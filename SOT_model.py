@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon March 11 18:12:00 2019
+Created on Mon March 12 18:01:02 2019
 
 @author: slab
 """
@@ -8,10 +8,13 @@ Created on Mon March 11 18:12:00 2019
 import pymc3 as pm
 import numpy as np
 import math
+from pprint import pprint
+from matplotlib import pyplot as plt
 import time
 import os
 
-model_name = "f_SOT"
+
+model_name = "SOT"
 
 # parameter settings and initializations
 start = 9 # haperparameter of TOPIC-NUM K
@@ -60,6 +63,7 @@ def create_dictionary(data):
                 word_index[w] = len(word_index)
     index_word = dict(zip(word_index.values(), word_index.keys()))
 
+create_dictionary(data) 
 
 # KL divergence
 def asymmetricKL(P, Q):  
@@ -77,25 +81,43 @@ def Diff(P, Q):
          summ += abs(P[i] - Q[i]) + delta
     return abs(base**(summ / len(P)))
 
-# compute the parameter of etas
-def compute_eta_list(L):
+# compute the mean of topic distribution of previous documents set
+def compute_mean_topics(beafore_d):
+    global doc_topic_distributions, decay
+    d_sum = 0*np.ones([topic_num])
+    n_sum = 0
+    if(beafore_d > len(doc_topic_distributions)):
+        beafore_d = len(doc_topic_distributions)
+    if(beafore_d < 1):
+        return doc_topic_distributions[beafore_d]
+
+    for i in range(0, beafore_d):
+        d_sum += doc_topic_distributions[i]
+        n_sum += beafore_d-i
+    return d_sum/n_sum
+
+end = 1
+# compute the list of parameter eta for each document
+def compute_eta_list():
     global doc_topic_distributions, epsilon, eta_list
-    for i in range(L, len(doc_topic_distributions)):
+    list(eta_list).clear()
+    eta_list = []
+    eta_list.append(np.array([0, 0, 1]))
+    for i in range(1, len(doc_topic_distributions)):
+        d_mean = compute_mean_topics(i)
+        d_previuos = doc_topic_distributions[i-1]
         d_current = doc_topic_distributions[i]
-        n_list = []
-        for j in range(i-L, i-1):
-            n_list.append(np.var(doc_topic_distributions[j])*Diff(d_current, doc_topic_distributions[j]))
+        n_0 = np.var(d_mean)*Diff(d_current, d_mean) 
+        n_1 = np.var(d_previuos)*Diff(d_current, d_previuos)  
         weight = 0*np.ones([topic_num])
         weight[0] = 1
-        n_outlier = np.var(weight)*epsilon
-        p_list = []
-        for n in n_list:
-            p_list.append(n / (n_outlier + np.array(n_list).sum()))
-        p_list.append(n_outlier / (n_outlier + np.array(n_list).sum()))
-        p_list = np.array(p_list)
-        eta_list[i] = p_list.copy()
-    
-# topic assignment for a word
+        n_2 = np.var(weight)*epsilon
+        p_0 = n_0 / (n_0 + n_1 + n_2)
+        p_1 = n_1 / (n_0 + n_1 + n_2)
+        p_2 = n_2 / (n_0 + n_1 + n_2)
+        eta_list.append(np.array([p_0, p_1, p_2]))
+
+# topic assignment based on a topic distribution
 def get_a_topic(doc_topic_distribution):
     topics = np.random.multinomial(1, doc_topic_distribution)
     topic = -1
@@ -105,13 +127,7 @@ def get_a_topic(doc_topic_distribution):
             break
     return topic
 
-base = 0.000001
-delta = 0.00001
-epsilon = abs(base**(0.25+delta))
-#print(epsilon)
-
-
-# intialization for all distributions
+# initialization of all distributions
 def initialize_distributions():
     global doc_topic_distributions, topic_word_distributions, topic_word_distribution
     doc_topic_distributions.clear()
@@ -127,8 +143,7 @@ def initialize_distributions():
         topic_word_distribution.append(1./words_num*np.ones([words_num]))
     return
 
-
-# initialize documents and their corressponding topics
+# malloc the memories topic assignments of each word for each document
 def initial_docs_list():
     global data, docs_list
     docs_list.clear()
@@ -136,6 +151,7 @@ def initial_docs_list():
          docs_list.append(np.ones([len(doc), 2], dtype = np.uint8))
     return
 
+# initialization of topic assignments for each word in each document
 def initialize_values_docs_list():
     global docs_list
     for d in range(0, len(data)):
@@ -143,8 +159,12 @@ def initialize_values_docs_list():
            docs_list[d][w] = [word_index[data[d][w]], get_a_topic(doc_topic_distributions[d])]
     return
 
+delta = 0.00001
+base = 0.000001
+epsilon = abs(base**(0.25+delta))
+#print(decay*epsilon)
 
-# compute topic assignments for each word in each document
+# compute topics for each document
 def compute_doc_topic():
     global doc_topic
     doc_topic = np.array(doc_topic)
@@ -152,17 +172,16 @@ def compute_doc_topic():
     for i in range(len(docs_list)):
         for j in range(0, len(docs_list[i])):
             doc_topic[i][docs_list[i][j][1]] += 1
-end = 1
-# compute topic assignment for document d
+
+# compute the topics for document d
 def compute_doc_topic_doc(d):
     global doc_topic
     doc_topic[d] = np.array(doc_topic[d])
     doc_topic[d] = 0*doc_topic[d]
-#    print(doc_topic[d])
     for j in range(0, len(docs_list[d])):
         doc_topic[d][docs_list[d][j][1]] += 1
 
-# compute topic-word distribuion
+# compute topic-word distributions
 def compute_topic_word():
     global topic_word
     topic_word = np.array(topic_word)
@@ -172,7 +191,7 @@ def compute_topic_word():
             topic_word[docs_list[i][j][1]][docs_list[i][j][0]] += 1
     return
 
-# compute topic word distribution list
+# computer topic word distribution of document d
 def compute_topic_word_list_doc(d):  
     global docs_list
     topic_word_list[d] = np.array(topic_word_list[d])
@@ -207,50 +226,39 @@ def get_total_n_k(d, w, k):
         total_n_k = total_n_k - 1
     return total_n_k
 
-# recompute topic distributions of word w
-def recompute_w_topic_distribution_for_fSOT(d, w, td_list, eta):
+# recompute topic distribution for word w
+def recompute_w_topic_distribution_for_SOT(d, w, td_mean, td_previuos, eta):
     new_topic_distribution = np.ones([topic_num])
     num_list = np.ones([topic_num])
-
     for topic in range(0, topic_num):
         n_d_k = get_n_d_k(d, w, topic)
         n_w_k = get_n_w_k(d, w, topic)
         total_n_k = get_total_n_k(d, w, topic)
-        former = 0
-        scope = 0
-        for t in td_list:
-            former += eta[scope]*(n_d_k + alpha*t[topic])
-            scope += 1
-        former += eta[scope]*(n_d_k + alpha)
-        p_d_w_k = former*(n_w_k + beta)/(total_n_k + words_num*beta)
+        p_d_w_k = eta[0]*(n_d_k + alpha*td_mean[topic])*(n_w_k + beta)/(total_n_k + words_num*beta) \
+                        + eta[1]*(n_d_k + alpha*td_previuos[topic])*(n_w_k + beta)/(total_n_k + words_num*beta) \
+                        + eta[2]*(n_d_k + alpha)*(n_w_k + beta)/(total_n_k + words_num*beta)
         num_list[topic] = p_d_w_k
         new_topic_distribution[topic] = p_d_w_k
     new_topic_distribution = new_topic_distribution / np.sum(new_topic_distribution) 
+#    print(new_topic_distribution)
     return new_topic_distribution
-
-# get the list of topic distribuions of the set of previous documents
-def ge_dt_list(d):
-    dt_list = []
-    if(d-L < 0):
-        strt = 0
-    else:
-        strt = d-L
-    for i in range(strt, d - 1):
-        dt_list.append(doc_topic_distributions[i])
-    return dt_list
-
+    
 # iteration of gibbs sampling
 def gibbs_sampling():
     global doc_topic_distributions, eta_list, st, ed, total_time
     st = 0
     ed = 0
     total_time = 0
-    
     for d in range(0, len(docs_list)):
+        td_mean = compute_mean_topics(d)
+        if(d < 1):
+            td_previuos = doc_topic_distributions[d]
+        else:
+            td_previuos = doc_topic_distributions[d-1]
+            
         st = time.time()
         for w in range(0, len(docs_list[d])):
-            dt_list = ge_dt_list(d)
-            new_pdf = recompute_w_topic_distribution_for_fSOT(d, w, dt_list, eta_list[d])               
+            new_pdf = recompute_w_topic_distribution_for_SOT(d, w, td_mean, td_previuos, eta_list[d])
             new_topic = get_a_topic(new_pdf)
             docs_list[d][w][1] = new_topic
         ed = time.time()
@@ -258,24 +266,27 @@ def gibbs_sampling():
         compute_doc_topic_doc(d)
         compute_topic_word_list_doc(d)
         recompute_distributions_doc(d)
-
+       
 # recompute topic distribution for document d
 def recompute_distributions_doc(d):
     doc_topic_distributions[d] = (doc_topic[d] + alpha) / (np.sum(doc_topic[d]) + len(doc_topic[d]) * alpha)
     for topic in range(0, len(topic_word)):
         topic_word_distributions[d][topic] = (topic_word_list[d][topic] + beta) / (np.sum(topic_word_list[d][topic]) + len(topic_word_list[d][topic]) * beta)
-   
-# recompute all distribuiotns      
+
+# recompute all distribuiotns          
 def recompute_distributions():
     for d in range(0, len(doc_topic)):
+#        print(doc_topic_distributions)
         doc_topic_distributions[d] = (doc_topic[d] + alpha) / (np.sum(doc_topic[d]) + len(doc_topic[d]) * alpha)
         for topic in range(0, len(topic_word)):
             topic_word_distributions[d][topic] = (topic_word_list[d][topic] + beta) / (np.sum(topic_word_list[d][topic]) + len(topic_word_list[d][topic]) * beta)
     for topic in range(0, len(topic_word)):
         topic_word_distribution[topic] = (topic_word[topic] + beta) / (np.sum(topic_word[topic]) + len(topic_word[topic]) * beta)
 
+
 def compare_distributions(dlist1, dlist2):
-    result = np.ones([len(dlist2)])  
+    result = np.ones([len(dlist2)])
+   
     if(len(dlist1) != len(dlist2)):
         return 
     for i in range(0, len(dlist1)):
@@ -300,6 +311,8 @@ def compute_perplexities():
             total += (-1)*math.log(total_topics)
     
     return math.exp(total / total_num) 
+        
+
 
 def parameter_estimation():
     per_list.clear()
@@ -307,7 +320,7 @@ def parameter_estimation():
     res_list2.clear()
     print(model_name)
     for i in range(0, iteration_num):
-        compute_eta_list(L)
+        compute_eta_list()        
         d1 = doc_topic_distributions.copy()
         d2 = topic_word_distribution.copy()
         gibbs_sampling()
@@ -322,9 +335,9 @@ def parameter_estimation():
     return
         
 def save_result(path):
-        # SAVE
     if not os.path.exists(path):
         os.makedirs(path)
+    
     LDA_docs_list = np.array(docs_list) 
     LDA_doc_topic_distributions = np.array(doc_topic_distributions)
     LDA_topic_word_distributions = np.array(topic_word_distributions)
@@ -355,7 +368,7 @@ def initialize():
     for i in range(0, docs_num):
         compute_topic_word_list_doc(i)
     return
-
+    
 def run(t_data, start, end_iter, iterations, save_p, clip, lambda_, pL, palpha, pbeta, delta):  
     global topic_num, iteration_num, data_clip, epsilon, data, docs_num, topic_num, words_num, L, eta_list, alpha, beta
     data.clear()
@@ -384,5 +397,3 @@ def run(t_data, start, end_iter, iterations, save_p, clip, lambda_, pL, palpha, 
         np.save("f_SOT_runtime_"+str(data_clip)+".npy", total_time)
     return 
  
-
-
