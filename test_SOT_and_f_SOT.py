@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Created on Mon May 28 18:57:00 2018
+Created on Mon March 11 18:20:20 2019
 
 @author: slab
 """
@@ -14,7 +14,7 @@ import SOT_model
 start = 10
 topics = start 
 end = 1
-iteration_num = 5
+iteration_num = 20
 clip = 10
 palpha = 0.05
 plam = 0.1
