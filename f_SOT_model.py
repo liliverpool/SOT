@@ -5,7 +5,6 @@ Created on Mon March 12 18:11:20 2019
 @author: slab
 """
 
-import pymc3 as pm
 import numpy as np
 import math
 import time
