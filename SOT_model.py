@@ -5,7 +5,6 @@ Created on Mon March 12 18:01:02 2019
 @author: slab
 """
 
-import pymc3 as pm
 import numpy as np
 import math
 from pprint import pprint
